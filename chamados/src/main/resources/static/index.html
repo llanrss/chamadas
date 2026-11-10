@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar · Chamados</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="login">
+  <aside class="side">
+    <a class="brand" href="index.html">Chamados</a>
+    <div>
+      <h1>Cada chamado, do aberto ao fechado.</h1>
+      <ol class="flow" aria-label="Ciclo de vida de um chamado">
+        <li style="--i:0"><b>Aberto</b><span>Registrado e esperando um técnico.</span></li>
+        <li style="--i:1"><b>Em atendimento</b><span>Um técnico está resolvendo.</span></li>
+        <li style="--i:2"><b>Aguardando cliente</b><span>Esperando retorno do cliente.</span></li>
+        <li style="--i:3"><b>Fechado</b><span>Resolvido. Não pode mais ser alterado.</span></li>
+      </ol>
+    </div>
+  </aside>
+
+  <div class="formwrap">
+    <form id="form" novalidate>
+      <h2>Entrar</h2>
+      <p class="lead">Use o e-mail de um técnico cadastrado.</p>
+
+      <div id="erro" class="msg erro" role="alert"></div>
+
+      <div class="field">
+        <label for="email">E-mail</label>
+        <input id="email" name="email" type="email" autocomplete="email" placeholder="carlos@empresa.com" required>
+      </div>
+      <button class="btn" type="submit" id="entrar">Entrar</button>
+
+      <div class="or">ou</div>
+      <button class="btn secondary" type="button" id="visitante">Continuar sem conta</button>
+
+      <p class="note">Não há senha nem cadastro. O acesso só identifica quem está atendendo os chamados.</p>
+    </form>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+<script>
+  if (App.sessao()) location.replace('chamados.html');
+
+  const form = document.getElementById('form');
+  const erro = document.getElementById('erro');
+  const botao = document.getElementById('entrar');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    erro.textContent = '';
+    const email = document.getElementById('email').value.trim().toLowerCase();
+    if (!email) { erro.textContent = 'Informe o e-mail para entrar.'; return; }
+
+    botao.disabled = true;
+    botao.textContent = 'Entrando…';
+    try {
+      const tecnicos = await App.api('/tecnicos');
+      const t = tecnicos.find((x) => (x.email || '').toLowerCase() === email);
+      if (!t) {
+        erro.textContent = 'Nenhum técnico cadastrado com esse e-mail. Confira o endereço ou continue sem conta.';
+        return;
+      }
+      App.entrar({ nome: t.nome, email: t.email, perfil: t.perfil, tecnicoId: t.id });
+      location.href = 'chamados.html';
+    } catch (err) {
+      erro.textContent = err.message;
+    } finally {
+      botao.disabled = false;
+      botao.textContent = 'Entrar';
+    }
+  });
+
+  document.getElementById('visitante').addEventListener('click', () => {
+    App.entrar({ nome: 'Visitante', email: null, perfil: 'VISITANTE', tecnicoId: null });
+    location.href = 'chamados.html';
+  });
+</script>
+</body>
+</html>

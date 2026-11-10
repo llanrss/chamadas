@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Novo chamado · Chamados</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar" id="topo"></header>
+
+<main>
+  <div class="pagehead">
+    <div>
+      <h1>Novo chamado</h1>
+      <p>Todo chamado nasce com o status Aberto.</p>
+    </div>
+  </div>
+
+  <form class="card" id="form" novalidate>
+    <div id="erro" class="msg erro" role="alert"></div>
+
+    <div class="field">
+      <label for="titulo">Título</label>
+      <input id="titulo" maxlength="150" placeholder="Ex.: Sem internet na sala 3" required>
+    </div>
+
+    <div class="field">
+      <label for="descricao">Descrição</label>
+      <textarea id="descricao" maxlength="2000" placeholder="O que aconteceu e desde quando?"></textarea>
+    </div>
+
+    <div class="row2">
+      <div class="field">
+        <label for="cliente">Cliente</label>
+        <div class="withadd">
+          <select id="cliente" required></select>
+          <button class="btn secondary small" type="button" data-novo="cliente">Novo</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="categoria">Categoria</label>
+        <div class="withadd">
+          <select id="categoria" required></select>
+          <button class="btn secondary small" type="button" data-novo="categoria">Nova</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field" style="max-width:16rem">
+      <label for="prioridade">Prioridade</label>
+      <select id="prioridade">
+        <option value="BAIXA">Baixa</option>
+        <option value="MEDIA" selected>Média</option>
+        <option value="ALTA">Alta</option>
+        <option value="CRITICA">Crítica</option>
+      </select>
+    </div>
+
+    <div class="formactions">
+      <button class="btn" type="submit" id="enviar">Abrir chamado</button>
+      <a class="btn secondary" href="chamados.html">Cancelar</a>
+    </div>
+  </form>
+</main>
+
+<dialog id="quick" aria-labelledby="q-titulo">
+  <form id="q-form" novalidate>
+    <h2 id="q-titulo"></h2>
+    <div id="q-erro" class="msg erro" role="alert"></div>
+    <div id="q-campos"></div>
+    <div class="actions">
+      <button class="btn secondary" type="button" id="q-cancelar">Cancelar</button>
+      <button class="btn" type="submit">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="js/app.js"></script>
+<script>
+  const sessao = App.iniciarPagina('novo-chamado.html');
+  const { api, esc } = App;
+  const erro = document.getElementById('erro');
+
+  /* Cadastro rápido: campos de cada tipo, conforme a API */
+  const TIPOS = {
+    cliente: {
+      titulo: 'Novo cliente', url: '/clientes', select: 'cliente',
+      campos: [['nome', 'Nome', 'text'], ['email', 'E-mail', 'email'], ['telefone', 'Telefone', 'tel']],
+    },
+    categoria: {
+      titulo: 'Nova categoria', url: '/categorias', select: 'categoria',
+      campos: [['nome', 'Nome', 'text'], ['descricao', 'Descrição', 'text']],
+    },
+  };
+
+  async function carregarLista(tipo, selecionar) {
+    const t = TIPOS[tipo];
+    const sel = document.getElementById(t.select);
+    const itens = await api(t.url);
+    sel.innerHTML = itens.length
+      ? '<option value="">Escolha…</option>' + itens.map((i) => `<option value="${i.id}">${esc(i.nome)}</option>`).join('')
+      : `<option value="">Nenhum cadastrado. Use o botão ao lado.</option>`;
+    if (selecionar) sel.value = selecionar;
+  }
+
+  async function iniciar() {
+    try { await Promise.all([carregarLista('cliente'), carregarLista('categoria')]); }
+    catch (e) { erro.textContent = e.message; }
+  }
+
+  /* diálogo de cadastro rápido */
+  const dlg = document.getElementById('quick');
+  const qErro = document.getElementById('q-erro');
+  let tipoAtual = null;
+
+  document.querySelectorAll('[data-novo]').forEach((b) => b.addEventListener('click', () => {
+    tipoAtual = b.dataset.novo;
+    const t = TIPOS[tipoAtual];
+    document.getElementById('q-titulo').textContent = t.titulo;
+    document.getElementById('q-campos').innerHTML = t.campos.map(([n, r, tp]) =>
+      `<div class="field"><label for="q-${n}">${r}</label><input id="q-${n}" type="${tp}"></div>`).join('');
+    qErro.textContent = '';
+    dlg.showModal();
+    document.getElementById('q-nome').focus();
+  }));
+  document.getElementById('q-cancelar').addEventListener('click', () => dlg.close());
+
+  document.getElementById('q-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const t = TIPOS[tipoAtual];
+    const corpo = {};
+    t.campos.forEach(([n]) => { corpo[n] = document.getElementById('q-' + n).value.trim(); });
+    try {
+      const criado = await api(t.url, { method: 'POST', body: corpo });
+      await carregarLista(tipoAtual, criado.id);
+      dlg.close();
+      App.toast(`${t.titulo.replace('Novo ', '').replace('Nova ', '')} cadastrado(a).`);
+    } catch (err) { qErro.textContent = err.message; }
+  });
+
+  /* envio do chamado */
+  document.getElementById('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    erro.textContent = '';
+    const titulo = document.getElementById('titulo').value.trim();
+    const clienteId = document.getElementById('cliente').value;
+    const categoriaId = document.getElementById('categoria').value;
+    if (!titulo) { erro.textContent = 'Informe um título para o chamado.'; return; }
+    if (!clienteId) { erro.textContent = 'Escolha o cliente do chamado.'; return; }
+    if (!categoriaId) { erro.textContent = 'Escolha a categoria do chamado.'; return; }
+
+    const btn = document.getElementById('enviar');
+    btn.disabled = true;
+    try {
+      const c = await api('/chamados', { method: 'POST', body: {
+        titulo,
+        descricao: document.getElementById('descricao').value.trim(),
+        prioridade: document.getElementById('prioridade').value,
+        clienteId: Number(clienteId),
+        categoriaId: Number(categoriaId),
+      }});
+      App.flash(`Chamado #${c.id} aberto.`);
+      location.href = 'chamados.html';
+    } catch (err) {
+      erro.textContent = err.message;
+      btn.disabled = false;
+    }
+  });
+
+  if (sessao) iniciar();
+</script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel · Chamados</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="topbar" id="topo"></header>
+
+<main>
+  <div class="pagehead">
+    <div>
+      <h1>Chamados</h1>
+      <p>Clique em um chamado para ver detalhes, atribuir técnico ou mudar o status.</p>
+    </div>
+    <a class="btn" href="novo-chamado.html">Novo chamado</a>
+  </div>
+
+  <div class="filters">
+    <div class="tabs" id="tabs" role="group" aria-label="Filtrar por status"></div>
+    <label class="sr-only" for="prio">Prioridade</label>
+    <select id="prio">
+      <option value="">Todas as prioridades</option>
+      <option value="CRITICA">Crítica</option>
+      <option value="ALTA">Alta</option>
+      <option value="MEDIA">Média</option>
+      <option value="BAIXA">Baixa</option>
+    </select>
+  </div>
+
+  <div class="list" id="lista" aria-live="polite"><div class="loading">Carregando chamados…</div></div>
+  <div class="pager" id="pager" hidden>
+    <span id="info"></span>
+    <div>
+      <button class="btn secondary small" id="ant" type="button">Anterior</button>
+      <button class="btn secondary small" id="prox" type="button">Próxima</button>
+    </div>
+  </div>
+</main>
+
+<dialog id="detalhe" aria-labelledby="d-titulo">
+  <div class="dhead">
+    <h2 id="d-titulo"></h2>
+    <button class="xbtn" type="button" id="fechar" aria-label="Fechar detalhes">&times;</button>
+  </div>
+  <div class="dbody" id="d-corpo"></div>
+</dialog>
+
+<script src="js/app.js"></script>
+<script>
+  const sessao = App.iniciarPagina('chamados.html');
+  const { esc, api, data: fmt, STATUS, PRIORIDADE, PROXIMOS } = App;
+
+  const estado = { status: '', prioridade: '', page: 0, size: 10, totalPages: 0, total: 0 };
+  let tecnicos = null;
+  let atual = null;
+
+  /* ---------- lista ---------- */
+  const tabs = document.getElementById('tabs');
+  const opcoes = [['', 'Todos'], ...Object.entries(STATUS)];
+  tabs.innerHTML = opcoes.map(([v, r]) =>
+    `<button type="button" data-v="${v}" aria-pressed="${v === ''}">${r}</button>`).join('');
+  tabs.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    estado.status = b.dataset.v; estado.page = 0;
+    tabs.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+    carregar();
+  });
+  document.getElementById('prio').addEventListener('change', (e) => {
+    estado.prioridade = e.target.value; estado.page = 0; carregar();
+  });
+  document.getElementById('ant').addEventListener('click', () => { estado.page--; carregar(); });
+  document.getElementById('prox').addEventListener('click', () => { estado.page++; carregar(); });
+
+  async function carregar() {
+    const lista = document.getElementById('lista');
+    const q = new URLSearchParams({ page: estado.page, size: estado.size });
+    if (estado.status) q.set('status', estado.status);
+    if (estado.prioridade) q.set('prioridade', estado.prioridade);
+    try {
+      const r = await api('/chamados?' + q);
+      const itens = r.content || [];
+      estado.totalPages = r.page ? r.page.totalPages : 1;
+      estado.total = r.page ? r.page.totalElements : itens.length;
+
+      if (!itens.length) {
+        lista.innerHTML = `<div class="empty"><h3>Nenhum chamado por aqui</h3>
+          <p>${estado.status || estado.prioridade ? 'Nenhum chamado com esses filtros. Limpe os filtros ou ' : 'Ainda não há chamados. '}<a href="novo-chamado.html">abra um novo chamado</a>.</p></div>`;
+      } else {
+        lista.innerHTML = `
+          <div class="lhead" aria-hidden="true"><span>Chamado</span><span>Status</span><span>Técnico</span><span>Aberto em</span></div>` +
+          itens.map((c) => `
+          <button type="button" class="item prio ${c.prioridade}" data-id="${c.id}">
+            <span><span class="t">${esc(c.titulo)}</span>
+              <span class="sub">#${c.id} · ${esc(c.clienteNome)} · ${esc(c.categoriaNome)} · prioridade ${PRIORIDADE[c.prioridade].toLowerCase()}</span></span>
+            <span class="chip ${c.status}">${STATUS[c.status]}</span>
+            <span class="col-tec muted">${c.tecnicoNome ? esc(c.tecnicoNome) : 'Sem técnico'}</span>
+            <span class="col-data muted">${fmt(c.dataAbertura)}</span>
+          </button>`).join('');
+      }
+      const pager = document.getElementById('pager');
+      pager.hidden = estado.totalPages <= 1;
+      document.getElementById('info').textContent =
+        `Página ${estado.page + 1} de ${estado.totalPages} · ${estado.total} chamados`;
+      document.getElementById('ant').disabled = estado.page === 0;
+      document.getElementById('prox').disabled = estado.page + 1 >= estado.totalPages;
+    } catch (err) {
+      lista.innerHTML = `<div class="empty"><h3>Não foi possível carregar</h3><p>${esc(err.message)}</p></div>`;
+    }
+  }
+  document.getElementById('lista').addEventListener('click', (e) => {
+    const b = e.target.closest('.item'); if (b) abrir(b.dataset.id);
+  });
+
+  /* ---------- detalhe ---------- */
+  const dlg = document.getElementById('detalhe');
+  document.getElementById('fechar').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+
+  const ROTULO_ACAO = { EM_ATENDIMENTO: 'Iniciar atendimento', AGUARDANDO_CLIENTE: 'Aguardar cliente', FECHADO: 'Fechar chamado' };
+
+  async function abrir(id) {
+    atual = id;
+    try {
+      if (!tecnicos) tecnicos = await api('/tecnicos');
+      await desenhar();
+      if (!dlg.open) dlg.showModal();
+    } catch (err) { App.toast(err.message, true); }
+  }
+
+  async function desenhar() {
+    const [c, coms] = await Promise.all([api('/chamados/' + atual), api(`/chamados/${atual}/comentarios`)]);
+    const fechado = c.status === 'FECHADO';
+    document.getElementById('d-titulo').textContent = c.titulo;
+    const acoes = PROXIMOS[c.status].map((s) => {
+      const rotulo = c.status === 'AGUARDANDO_CLIENTE' && s === 'EM_ATENDIMENTO' ? 'Retomar atendimento' : ROTULO_ACAO[s];
+      return `<button class="btn${s === 'FECHADO' ? ' secondary' : ''} small" type="button" data-status="${s}">${rotulo}</button>`;
+    }).join('');
+
+    document.getElementById('d-corpo').innerHTML = `
+      <section>
+        <dl class="meta">
+          <dt>Status</dt><dd><span class="chip ${c.status}">${STATUS[c.status]}</span></dd>
+          <dt>Prioridade</dt><dd><span class="chip prio ${c.prioridade}">${PRIORIDADE[c.prioridade]}</span></dd>
+          <dt>Cliente</dt><dd>${esc(c.clienteNome)}</dd>
+          <dt>Categoria</dt><dd>${esc(c.categoriaNome)}</dd>
+          <dt>Técnico</dt><dd>${c.tecnicoNome ? esc(c.tecnicoNome) : 'Sem técnico'}</dd>
+          <dt>Aberto em</dt><dd>${fmt(c.dataAbertura)}</dd>
+          ${fechado ? `<dt>Fechado em</dt><dd>${fmt(c.dataFechamento)}</dd>` : ''}
+        </dl>
+      </section>
+      <section><h3>Descrição</h3><p class="desc">${c.descricao ? esc(c.descricao) : 'Sem descrição.'}</p></section>
+      <section>
+        <h3>Atendimento</h3>
+        ${fechado ? '<p class="muted">Este chamado está fechado e não pode ser alterado.</p>' : `
+          <div class="actions" style="margin-bottom:1rem">${acoes}</div>
+          <label class="sr-only" for="sel-tec">Técnico</label>
+          <div class="assign">
+            <select id="sel-tec">
+              <option value="">Escolha um técnico</option>
+              ${tecnicos.map((t) => `<option value="${t.id}"${t.id === c.tecnicoId ? ' selected' : ''}>${esc(t.nome)}</option>`).join('')}
+            </select>
+            <button class="btn secondary small" type="button" id="atribuir">Atribuir</button>
+          </div>
+          ${tecnicos.length ? '' : '<p class="muted" style="margin-top:.5rem">Nenhum técnico cadastrado ainda.</p>'}`}
+      </section>
+      <section>
+        <h3>Comentários (${coms.length})</h3>
+        ${coms.length ? coms.map((m) => `<div class="coment"><b>${esc(m.autor)}</b><small>${fmt(m.data)}</small><p>${esc(m.texto)}</p></div>`).join('')
+          : '<p class="muted">Nenhum comentário ainda.</p>'}
+        ${fechado ? '' : `
+        <form id="f-com" style="margin-top:1rem">
+          <div class="field"><label for="texto">Novo comentário</label><textarea id="texto" style="min-height:4.5rem" maxlength="2000"></textarea></div>
+          <button class="btn small" type="submit">Comentar</button>
+        </form>`}
+      </section>`;
+  }
+
+  document.getElementById('d-corpo').addEventListener('click', async (e) => {
+    const st = e.target.closest('[data-status]');
+    if (st) return agir(() => api(`/chamados/${atual}/status`, { method: 'PATCH', body: { status: st.dataset.status } }), 'Status atualizado.');
+    if (e.target.id === 'atribuir') {
+      const v = document.getElementById('sel-tec').value;
+      if (!v) return App.toast('Escolha um técnico para atribuir.', true);
+      agir(() => api(`/chamados/${atual}/atribuir`, { method: 'PATCH', body: { tecnicoId: Number(v) } }), 'Técnico atribuído.');
+    }
+  });
+  document.getElementById('d-corpo').addEventListener('submit', (e) => {
+    if (e.target.id !== 'f-com') return;
+    e.preventDefault();
+    const texto = document.getElementById('texto').value.trim();
+    if (!texto) return App.toast('Escreva o comentário antes de enviar.', true);
+    agir(() => api(`/chamados/${atual}/comentarios`, { method: 'POST', body: { texto, autor: sessao.nome } }), 'Comentário adicionado.');
+  });
+
+  async function agir(fn, ok) {
+    try { await fn(); App.toast(ok); await desenhar(); carregar(); }
+    catch (err) { App.toast(err.message, true); }
+  }
+
+  if (sessao) carregar();
+</script>
+</body>
+</html>
